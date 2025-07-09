@@ -10,3 +10,5 @@ gunicorn
 requests
 scipy
 plotly
+fastapi
+uvicorn
