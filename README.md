@@ -60,7 +60,7 @@ pip install fastapi uvicorn pandas numpy scikit-learn matplotlib seaborn shap op
 ### 🧪 4. Run the FastAPI Server
 
 ```bash
-uvicorn app.api:app --reload
+uvicorn main:app --reload
 ```
 
 You should see output like:

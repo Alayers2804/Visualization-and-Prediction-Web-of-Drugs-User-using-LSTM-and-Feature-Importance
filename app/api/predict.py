@@ -11,7 +11,6 @@ from app.config import FILE_PATH as file_path
 from app.config import get_timestamp, visualizer
 
 router = APIRouter()
-router = APIRouter()
 
 
 
