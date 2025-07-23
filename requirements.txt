@@ -10,3 +10,6 @@ gunicorn
 requests
 scipy
 plotly
+fastapi
+uvicorn
+openpyxl

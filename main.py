@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import router
+from app.api import predict, feature, profile
 
 app = FastAPI(title="TAT & Rehab ML Service")
 
@@ -14,6 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include endpoints
-app.include_router(router)
+app.include_router(predict.router, tags=["Prediction"])
+app.include_router(feature.router, tags=["Feature Analysis"])
+app.include_router(profile.router, tags=["Profile Summary"])
 
