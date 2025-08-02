@@ -16,7 +16,6 @@ router = APIRouter()
 def important_features(
     features: List[str] = Query(default=["USIA", "PEKERJAAN", "PENDIDIKAN TERAKHIR"])
 ):
-    file_path = "data/dataset_tat_rehab.xlsx"
     df = pd.read_excel(file_path, sheet_name="GABUNGAN")
     df.columns = df.columns.str.strip()
 
