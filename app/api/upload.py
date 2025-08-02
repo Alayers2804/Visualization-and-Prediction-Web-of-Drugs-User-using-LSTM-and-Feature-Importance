@@ -1,14 +1,14 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 import shutil, os
 from app.config import SessionLocal
-from app.model.database import DatasetUpload
+from app.model.database import DatasetUpload, SuspectRecord
 import pandas as pd
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from model.database import SuspectRecord  # your SQLAlchemy model
+
 from app.config import SessionLocal
 
 router = APIRouter()
@@ -46,18 +46,6 @@ async def upload_dataset(file: UploadFile = File(...)):
         # Save file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
-        # Try to read XLSX for schema validation
-        try:
-            df = pd.read_excel(file_path)
-            required_columns = {"TANGGAL", "DOMISILI", "JUMLAH_KASUS"}
-            if not required_columns.issubset(set(df.columns)):
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"File harus memiliki kolom: {', '.join(required_columns)}"
-                )
-        except Exception as e:
-            raise HTTPException(status_code=422, detail=f"Format XLSX tidak valid: {str(e)}")
 
         # Save metadata to DB
         db = SessionLocal()
