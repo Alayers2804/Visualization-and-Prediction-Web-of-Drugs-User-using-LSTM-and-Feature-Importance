@@ -13,3 +13,9 @@ plotly
 fastapi
 uvicorn
 openpyxl
+sqlalchemy
+aiosqlite
+databases
+python-multipart
+mapclassify
+geopandas
