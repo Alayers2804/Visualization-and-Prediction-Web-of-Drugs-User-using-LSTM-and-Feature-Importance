@@ -1,24 +1,25 @@
 # preprocessing.py
+from typing import Optional
 import pandas as pd
 
-def load_monthly_case_data(file_path: str, sheet_name="GABUNGAN"):
-    # Load Excel
+def load_monthly_case_data(file_path: str, sheet_name="GABUNGAN", area: Optional[str] = None):
     df = pd.read_excel(file_path, sheet_name=sheet_name)
     df.columns = df.columns.str.strip()
 
-    # Convert date column
     df['TANGGAL'] = pd.to_datetime(df['TANGGAL'], errors='coerce')
     df = df.dropna(subset=['TANGGAL'])
 
-    # Extract monthly period
+    if area and "DOMISILI" in df.columns:
+        df = df[df["DOMISILI"].str.strip().str.upper() == area.strip().upper()]
+
     df['BULAN'] = df['TANGGAL'].dt.to_period('M').astype(str)
 
-    # Group by month
     monthly_data = df.groupby('BULAN').size().reset_index(name='JUMLAH_KASUS')
     monthly_data['BULAN'] = pd.to_datetime(monthly_data['BULAN'])
     monthly_data = monthly_data.sort_values(by='BULAN').reset_index(drop=True)
 
     return monthly_data
+
 
 def clean_profile_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()

@@ -21,7 +21,7 @@ def drug_user_profile_summary():
     except Exception as e:
         return {"error": str(e)}
 
-
+    
 @router.get("/profile-summary/plot")
 def profile_plot(
     features: List[str] = Query(default=[]),
