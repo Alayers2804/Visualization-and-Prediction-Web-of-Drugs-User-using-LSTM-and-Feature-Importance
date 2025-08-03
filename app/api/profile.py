@@ -6,13 +6,17 @@ from app.model.preprocessing import clean_profile_data
 from app.model.feature_analysis import profile_summary
 from fastapi.responses import FileResponse, JSONResponse
 from app.config import FILE_PATH as file_path
+from app.util.dataset_loader import get_dataset_by_id
 from app.config import get_timestamp, visualizer
 
 router = APIRouter()
 
+
 @router.get("/profile-summary")
-def drug_user_profile_summary():
-    df = pd.read_excel(file_path, sheet_name="GABUNGAN")
+def drug_user_profile_summary(
+    dataset_id: int = Query(..., description="ID of the dataset to use")
+):
+    df = get_dataset_by_id(dataset_id)
 
     try:
         cleaned_df = clean_profile_data(df)
@@ -21,13 +25,14 @@ def drug_user_profile_summary():
     except Exception as e:
         return {"error": str(e)}
 
-    
+
 @router.get("/profile-summary/plot")
 def profile_plot(
     features: List[str] = Query(default=[]),
-    return_base64: bool = Query(default=False)
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
+    return_base64: bool = Query(default=False),
 ):
-    df = pd.read_excel(file_path, sheet_name="GABUNGAN")
+    df = get_dataset_by_id(dataset_id)
     cleaned_df = clean_profile_data(df)
 
     if not features:
@@ -49,7 +54,9 @@ def profile_plot(
         filenames = []
         for feature in features:
             filename = visualizer.plot_profile_distribution(
-                cleaned_df, feature, filename=f"profile_{feature.lower()}_{get_timestamp}.png"
+                cleaned_df,
+                feature,
+                filename=f"profile_{feature.lower()}_{get_timestamp}.png",
             )
             filenames.append(filename)
         # For now, just return the first image (or zip later)

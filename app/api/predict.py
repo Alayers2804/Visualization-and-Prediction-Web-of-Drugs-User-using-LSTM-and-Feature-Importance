@@ -12,17 +12,22 @@ import matplotlib.pyplot as plt
 from fastapi.responses import FileResponse, JSONResponse
 import numpy as np
 from app.config import FILE_PATH as file_path
+from app.util.dataset_loader import get_dataset_by_id
 from app.config import get_timestamp, visualizer
 
 router = APIRouter()
 
 
 @router.get("/predict")
-def predict(n_months: int = 2, target_column: str = "JUMLAH_KASUS"):
+def predict(
+    n_months: int = 2,
+    target_column: str = "JUMLAH_KASUS",
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
+):
     """
     Predict next n_months for the selected target column with future month labels.
     """
-    monthly_data = load_monthly_case_data(file_path)
+    monthly_data = load_monthly_case_data(dataset_id)
 
     if target_column not in monthly_data.columns:
         return {"error": f"Target column '{target_column}' not found in dataset."}
@@ -52,11 +57,16 @@ def predict(n_months: int = 2, target_column: str = "JUMLAH_KASUS"):
 
 
 @router.get("/predict/predict-by-area")
-def predict_by_area(area: str, n_months: int = 2, target_column: str = "JUMLAH_KASUS"):
+def predict_by_area(
+    area: str,
+    n_months: int = 2,
+    target_column: str = "JUMLAH_KASUS",
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
+):
     """
     Predict the next `n_months` for the selected area (based on DOMISILI) using LSTM.
     """
-    monthly_data = load_monthly_case_data(file_path, area=area)
+    monthly_data = load_monthly_case_data(dataset_id, area=area)
 
     if monthly_data.empty:
         return {"error": f"No data found for area (DOMISILI) '{area}'."}
@@ -93,8 +103,13 @@ def predict_by_area(area: str, n_months: int = 2, target_column: str = "JUMLAH_K
 
 
 @router.get("/predict/test")
-def test_prediction_metrics(test_size: int = 3, target_column: str = "JUMLAH_KASUS"):
-    monthly_data = load_monthly_case_data(file_path)
+def test_prediction_metrics(
+    test_size: int = 3,
+    target_column: str = "JUMLAH_KASUS",
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
+):
+    
+    monthly_data = load_monthly_case_data(dataset_id)
 
     if target_column not in monthly_data.columns:
         return {"error": f"Target column '{target_column}' not found in dataset."}
@@ -141,9 +156,10 @@ def test_prediction_metrics(test_size: int = 3, target_column: str = "JUMLAH_KAS
 def predict_plot(
     n_months: int = 2,
     target_column: str = "JUMLAH_KASUS",
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
     return_base64: bool = Query(False),
 ):
-    monthly_data = load_monthly_case_data(file_path)
+    monthly_data = load_monthly_case_data(dataset_id)
 
     if target_column not in monthly_data.columns:
         return {"error": f"Target column '{target_column}' not found."}
@@ -187,18 +203,19 @@ def predict_plot(
 
 
 @router.get("/predict/available-areas")
-def list_areas():
-    df = pd.read_excel(file_path, sheet_name="GABUNGAN")
+def list_areas(dataset_id: int = Query(..., description="ID of the dataset to use")):
+    df = get_dataset_by_id(dataset_id)
     areas = df["DOMISILI"].dropna().unique().tolist()
     return {"areas": sorted(areas)}
 
 
 @router.get("/predict/heatmap")
-def generate_heatmap(month: str = None):
-    df = pd.read_excel(file_path, sheet_name="GABUNGAN")
+def generate_heatmap(
+    month: str = None,
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
+):
+    df = get_dataset_by_id(dataset_id)
 
     return visualizer.plot_heatmap_dual(
-        df=df,
-        map_path="data/kota-kabupaten.json",
-        month=month
+        df=df, map_path="data/kota-kabupaten.json", month=month
     )
