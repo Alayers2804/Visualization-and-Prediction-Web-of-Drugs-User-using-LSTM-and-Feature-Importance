@@ -6,7 +6,7 @@ from app.model.feature_analysis import prepare_features
 from fastapi.responses import FileResponse, JSONResponse
 from scipy.stats import entropy
 import numpy as np
-from app.config import FILE_PATH as file_path
+from app.util.dataset_loader import get_dataset_by_id
 from app.config import get_timestamp, visualizer
 
 router = APIRouter()
@@ -14,9 +14,11 @@ router = APIRouter()
 
 @router.get("/features")
 def important_features(
-    features: List[str] = Query(default=["USIA", "PEKERJAAN", "PENDIDIKAN TERAKHIR"])
+    features: List[str] = Query(default=["USIA", "PEKERJAAN", "PENDIDIKAN TERAKHIR"]),
+    dataset_id: int = Query(..., description="ID of the dataset to use")
 ):
-    df = pd.read_excel(file_path, sheet_name="GABUNGAN")
+    
+    df = get_dataset_by_id(dataset_id)
     df.columns = df.columns.str.strip()
 
     for col in features:
@@ -45,9 +47,10 @@ def important_features(
 @router.get("/features/plot")
 def feature_plot(
     features: List[str] = Query(default=["USIA", "PEKERJAAN", "PENDIDIKAN TERAKHIR"]),
+    dataset_id: int = Query(..., description="ID of the dataset to use"),
     return_base64: bool = Query(False)
 ):
-    df = pd.read_excel(file_path, sheet_name="GABUNGAN")
+    df = get_dataset_by_id(dataset_id)
     Xf, _ = prepare_features(df, features)
 
     importance = {}
