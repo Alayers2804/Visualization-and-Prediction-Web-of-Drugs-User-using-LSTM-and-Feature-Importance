@@ -158,12 +158,13 @@ class Visualizer:
         if leg:
             leg.set_title("Jumlah Kasus")
 
-        for idx, row in merged.nlargest(10, "TOTAL_KASUS").iterrows():
+        for idx, row in merged[merged["TOTAL_KASUS"] > 0].iterrows():
+            label = f"{row['DOMISILI']}\n{int(row['TOTAL_KASUS'])}"
             ax_zoom.annotate(
-                text=str(int(row["TOTAL_KASUS"])),
+                text=label,
                 xy=(row["geometry"].centroid.x, row["geometry"].centroid.y),
                 ha="center",
-                fontsize=8,
+                fontsize=6,
                 color="black",
                 weight="bold",
             )
