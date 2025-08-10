@@ -1,12 +1,15 @@
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
 import os
 import base64
 import io
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import folium
+from folium.features import GeoJsonTooltip
 
 class Visualizer:
     def __init__(self, output_dir="static"):
@@ -26,25 +29,71 @@ class Visualizer:
         fig.savefig(full_path)
         plt.close(fig)
         return full_path
+    
+    def plot_forecast(
+        self, df, predictions, date_column, value_column,
+        forecast_months, filename=None, return_base64=False
+    ):
+        # Ensure date_column is datetime
+        df[date_column] = pd.to_datetime(df[date_column])
 
-    def plot_forecast(self, df, predictions, date_column, value_column,
-                      forecast_months, filename=None, return_base64=False):
         last_date = df[date_column].iloc[-1]
-        future_dates = pd.date_range(last_date + pd.DateOffset(months=1), periods=forecast_months, freq='MS')
+        future_dates = pd.date_range(
+            last_date + pd.DateOffset(months=1),
+            periods=forecast_months,
+            freq='MS'
+        )
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(df[date_column], df[value_column], label="Actual")
-        ax.plot(future_dates, predictions, linestyle='--', marker='o', label="Forecast")
-        ax.set_title(f"Forecast of {value_column}")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Value")
-        ax.legend()
-        ax.grid(True)
+        if len(predictions) > forecast_months:
+            step = len(predictions) // forecast_months
+            monthly_preds = [predictions[i] for i in range(0, len(predictions), step)]
+            monthly_preds = monthly_preds[:forecast_months]
+        else:
+            monthly_preds = predictions
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(18, 10), sharex=False)
+        plt.subplots_adjust(hspace=0.5)
+
+        # Actual data plot
+        ax1.plot(df[date_column], df[value_column], marker='o', color='blue')
+        ax1.set_title(f"Actual {value_column} Data")
+        ax1.set_xlabel("Date")
+        ax1.set_ylabel("Value")
+        ax1.grid(True)
+        ax1.tick_params(axis='x', labelrotation=45)
+        for label in ax1.get_xticklabels():
+            label.set_ha('right')
+
+        ax1.set_xlim(df[date_column].min() - pd.Timedelta(days=10), df[date_column].max() + pd.Timedelta(days=10))
+
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax1.xaxis.set_major_locator(mdates.MonthLocator())
+
+        # Prediction plot
+        ax2.plot(
+            future_dates, monthly_preds,
+            linestyle='--', marker='o', color='orange', markersize=8
+        )
+        ax2.set_title(f"Predicted {value_column} for Next {forecast_months} Months")
+        ax2.set_xlabel("Date")
+        ax2.set_ylabel("Value")
+        ax2.grid(True)
+
+        ax2.tick_params(axis='x', labelrotation=45)
+        for label in ax2.get_xticklabels():
+            label.set_ha('right')
+
+        ax2.set_xlim(future_dates[0] - pd.Timedelta(days=10), future_dates[-1] + pd.Timedelta(days=10))
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax2.xaxis.set_major_locator(mdates.MonthLocator())
+
+        fig.tight_layout()
 
         if return_base64:
             return self.fig_to_base64(fig)
         else:
             return self.save_plot(fig, filename)
+
 
     def plot_feature_importance(self, importance: dict, filename=None, return_base64=False):
         features = list(importance.keys())
@@ -74,7 +123,7 @@ class Visualizer:
         else:
             return self.save_plot(fig, filename)
 
-    def plot_heatmap_dual(self, df, map_path: str, month: str = None) -> dict:
+    def plot_heatmap_dual_interactive(self, df, map_path: str, predictions_df: pd.DataFrame, month: str = None) -> dict:
         df.columns = df.columns.str.strip()
         df["TANGGAL"] = pd.to_datetime(df["TANGGAL"], errors="coerce")
         df["BULAN"] = df["TANGGAL"].dt.to_period("M").astype(str)
@@ -95,84 +144,41 @@ class Visualizer:
         merged = map_df.merge(case_counts, on="DOMISILI", how="left")
         merged["TOTAL_KASUS"] = merged["TOTAL_KASUS"].fillna(0)
 
-        if merged["TOTAL_KASUS"].sum() == 0:
-            return {
-                "error": f"Tidak ada data kasus untuk bulan {month or 'yang dipilih'}."
-            }
-        
-        plot_df = merged.copy()
-        plot_df.loc[plot_df["TOTAL_KASUS"] == 0, "TOTAL_KASUS"] = None 
-        # Plot full map
-        fig_full, ax_full = plt.subplots(1, 1, figsize=(10, 12))
+        predictions_df["DOMISILI"] = predictions_df["DOMISILI"].str.upper().str.strip()
+        merged = merged.merge(predictions_df, on="DOMISILI", how="left")
+        merged["JUMLAH_PREDIKSI"] = merged["JUMLAH_PREDIKSI"].fillna(0)
 
-        plot_df.plot(
-            column="TOTAL_KASUS",
-            cmap="Reds",
-            linewidth=0.5,
-            ax=ax_full,
-            edgecolor="0.8",
-            legend=True,
-            scheme="quantiles",  # Or "equal_interval" if you prefer
-            missing_kwds={
-                "color": "lightgrey",
-                "label": "No data",
+        if merged["TOTAL_KASUS"].sum() == 0 and merged["JUMLAH_PREDIKSI"].sum() == 0:
+            return {"error": f"Tidak ada data untuk bulan {month or 'yang dipilih'}."}
+
+        center = [merged.geometry.centroid.y.mean(), merged.geometry.centroid.x.mean()]
+        m = folium.Map(location=center, zoom_start=8, tiles="cartodbpositron")
+
+        folium.Choropleth(
+            geo_data=merged.to_json(),
+            data=merged,
+            columns=["DOMISILI", "JUMLAH_PREDIKSI"],
+            key_on="feature.properties.DOMISILI",
+            fill_color="YlOrRd",
+            fill_opacity=0.7,
+            line_opacity=0.2,
+            legend_name="Jumlah Prediksi"
+        ).add_to(m)
+
+        # Tooltip with both
+        folium.GeoJson(
+            merged,
+            name="Kasus & Prediksi",
+            style_function=lambda x: {
+                "fillColor": "#transparent",
+                "color": "black",
+                "weight": 0.5
             },
-        )
-
-        ax_full.set_title(f"Peta Kasus per DOMISILI {'(' + month + ')' if month else ''}")
-        ax_full.axis("off")
-        leg = ax_full.get_legend()
-        if leg:
-            leg.set_title("Jumlah Kasus")
-
-        plt.tight_layout()
-        full_base64 = self.fig_to_base64(fig_full, bbox_inches='tight')
-
-        # Plot zoomed (focused) map
-        non_zero = merged[merged["TOTAL_KASUS"] > 0]
-        fig_zoom, ax_zoom = plt.subplots(1, 1, figsize=(14, 16))
-
-        plot_df.plot(
-            column="TOTAL_KASUS",
-            cmap="Reds",
-            linewidth=0.5,
-            ax=ax_zoom,
-            edgecolor="0.8",
-            legend=True,
-            scheme="quantiles",
-            missing_kwds={
-                "color": "lightgrey",
-                "label": "No data",
-            },
-        )
-
-        ax_zoom.set_title(f"Zoomed Peta Kasus {'(' + month + ')' if month else ''}")
-        ax_zoom.axis("off")
-
-        if not non_zero.empty:
-            minx, miny, maxx, maxy = non_zero.total_bounds
-            ax_zoom.set_xlim(minx, maxx)
-            ax_zoom.set_ylim(miny, maxy)
-
-        leg = ax_zoom.get_legend()
-        if leg:
-            leg.set_title("Jumlah Kasus")
-
-        for idx, row in merged[merged["TOTAL_KASUS"] > 0].iterrows():
-            label = f"{row['DOMISILI']}\n{int(row['TOTAL_KASUS'])}"
-            ax_zoom.annotate(
-                text=label,
-                xy=(row["geometry"].centroid.x, row["geometry"].centroid.y),
-                ha="center",
-                fontsize=6,
-                color="black",
-                weight="bold",
+            tooltip=GeoJsonTooltip(
+                fields=["DOMISILI", "TOTAL_KASUS", "JUMLAH_PREDIKSI"],
+                aliases=["Domisili:", "Jumlah Kasus Aktual:", "Jumlah Prediksi:"],
+                localize=True
             )
+        ).add_to(m)
 
-        plt.tight_layout()
-        zoom_base64 = self.fig_to_base64(fig_zoom, bbox_inches='tight')
-
-        return {
-            "full_map_base64": full_base64,
-            "focused_map_base64": zoom_base64,
-        }
+        return {"map_html": m._repr_html_()}

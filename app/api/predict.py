@@ -55,53 +55,6 @@ def predict(
         content={"forecast": forecast_result, "target_column": target_column}
     )
 
-
-@router.get("/predict/predict-by-area")
-def predict_by_area(
-    area: str,
-    n_months: int = 2,
-    target_column: str = "JUMLAH_KASUS",
-    dataset_id: int = Query(..., description="ID of the dataset to use"),
-):
-    """
-    Predict the next `n_months` for the selected area (based on DOMISILI) using LSTM.
-    """
-    monthly_data = load_monthly_case_data(dataset_id, area=area)
-
-    if monthly_data.empty:
-        return {"error": f"No data found for area (DOMISILI) '{area}'."}
-
-    if target_column not in monthly_data.columns:
-        return {"error": f"Target column '{target_column}' not found."}
-
-    X, y, scaler = prepare_lstm_data(
-        monthly_data, target_column=target_column, sequence_length=3
-    )
-    model = build_lstm_model(X.shape[1:])
-    model.fit(X, y, epochs=200, verbose=0)
-
-    prediction = forecast_next(model, X[-1], scaler, n_steps=n_months).ravel().tolist()
-
-    last_date = monthly_data["BULAN"].max()
-    future_months = pd.date_range(
-        start=last_date + pd.DateOffset(months=1), periods=n_months, freq="MS"
-    )
-    future_months_str = future_months.strftime("%Y-%m")
-
-    forecast_result = [
-        {"month": month, "predicted_cases": round(value, 2)}
-        for month, value in zip(future_months_str, prediction)
-    ]
-
-    return JSONResponse(
-        content={
-            "area": area,
-            "forecast": forecast_result,
-            "target_column": target_column,
-        }
-    )
-
-
 @router.get("/predict/test")
 def test_prediction_metrics(
     test_size: int = 3,
@@ -213,9 +166,51 @@ def list_areas(dataset_id: int = Query(..., description="ID of the dataset to us
 def generate_heatmap(
     month: str = None,
     dataset_id: int = Query(..., description="ID of the dataset to use"),
+    n_months: int = 1,
+    target_column: str = "JUMLAH_KASUS",
 ):
     df = get_dataset_by_id(dataset_id)
+    areas = df["DOMISILI"].dropna().unique()
 
-    return visualizer.plot_heatmap_dual(
-        df=df, map_path="data/kota-kabupaten.json", month=month
+    predictions = []
+
+    for area in areas:
+        monthly_data = load_monthly_case_data(dataset_id, area=area)
+
+        if monthly_data.empty or target_column not in monthly_data.columns:
+            predictions.append({
+                "DOMISILI": area.upper().strip(),
+                "JUMLAH_PREDIKSI": 0
+            })
+            continue
+
+        X, y, scaler = prepare_lstm_data(
+            monthly_data, target_column=target_column, sequence_length=3
+        )
+
+        # Skip if not enough data to form sequences
+        if X.ndim != 3 or X.shape[0] == 0:
+            predictions.append({
+                "DOMISILI": area.upper().strip(),
+                "JUMLAH_PREDIKSI": 0
+            })
+            continue
+
+        model = build_lstm_model(X.shape[1:])
+        model.fit(X, y, epochs=200, verbose=0)
+
+        prediction = forecast_next(model, X[-1], scaler, n_steps=n_months).ravel().tolist()
+        first_pred = round(prediction[0], 2)
+        predictions.append({
+            "DOMISILI": area.upper().strip(),
+            "JUMLAH_PREDIKSI": first_pred
+        })
+
+    predictions_df = pd.DataFrame(predictions)
+
+    return visualizer.plot_heatmap_dual_interactive(
+        df=df,
+        map_path="data/kota-kabupaten.json",
+        predictions_df=predictions_df,
+        month=month
     )

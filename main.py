@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import predict, feature, profile, upload
+from app.api import predict, feature, profile, upload, list_data
 from app.config import init_db
 
 init_db()
@@ -19,3 +19,4 @@ app.include_router(predict.router, tags=["Prediction"])
 app.include_router(feature.router, tags=["Feature Analysis"])
 app.include_router(profile.router, tags=["Profile Summary"])
 app.include_router(upload.router, tags=["Dataset Upload"])
+app.include_router(list_data.router, tags=["List Data"])
