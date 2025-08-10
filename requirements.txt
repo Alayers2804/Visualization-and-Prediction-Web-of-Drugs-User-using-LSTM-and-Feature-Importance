@@ -19,3 +19,4 @@ databases
 python-multipart
 mapclassify
 geopandas
+folium

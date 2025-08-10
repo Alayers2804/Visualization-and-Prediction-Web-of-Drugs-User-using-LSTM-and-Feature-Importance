@@ -9,7 +9,6 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.config import SessionLocal
 
 router = APIRouter()
 
@@ -73,10 +72,51 @@ def list_uploaded_datasets():
     db.close()
     return datasets
 
+
 @router.post("/suspects/")
-def create_suspect(record: SuspectRecordCreate, db: Session = Depends(SessionLocal)):
+def create_suspect(record: SuspectRecordCreate):
+
+    def validate_date(date_value, field_name):
+        if date_value is None:
+            raise HTTPException(
+                status_code=400,
+                detail={field_name: "This field is required"}
+            )
+
+        # Accept both string & datetime
+        if isinstance(date_value, datetime):
+            return date_value
+
+        if isinstance(date_value, str):
+            formats = [
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d",
+                "%d-%m-%Y",
+                "%d/%m/%Y",
+                "%Y/%m/%d",
+            ]
+            for fmt in formats:
+                try:
+                    return datetime.strptime(date_value, fmt)
+                except ValueError:
+                    continue
+
+        raise HTTPException(
+            status_code=400,
+            detail={field_name: f"Invalid date format: '{date_value}'. Expected one of: YYYY-MM-DD, DD-MM-YYYY, or ISO datetime"}
+        )
+
+    # Run validation
+    record.tanggal = validate_date(record.tanggal, "tanggal")
+    record.tanggal_lahir = validate_date(record.tanggal_lahir, "tanggal_lahir")
+
+    db = SessionLocal()
+
+    # Save to DB
     db_record = SuspectRecord(**record.dict())
     db.add(db_record)
     db.commit()
     db.refresh(db_record)
+
     return {"message": "Record created", "id": db_record.id}
