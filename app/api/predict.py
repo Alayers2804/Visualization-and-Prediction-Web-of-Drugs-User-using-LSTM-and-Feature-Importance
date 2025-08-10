@@ -1,9 +1,12 @@
 # app/api.py
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 import pandas as pd
 from app.model.preprocessing import load_monthly_case_data
 from app.model.lstm_model import prepare_lstm_data, build_lstm_model, forecast_next
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.model_selection import train_test_split
+
 from io import BytesIO
 import numpy as np
 import geopandas as gpd
@@ -57,29 +60,62 @@ def predict(
 
 @router.get("/predict/test")
 def test_prediction_metrics(
-    test_size: int = 3,
+    test_size_ratio: float = 0.2,
+    val_size_ratio: float = 0.1,
     target_column: str = "JUMLAH_KASUS",
-    dataset_id: int = Query(..., description="ID of the dataset to use"),
+    dataset_id: int = Query(...),
 ):
-    
     monthly_data = load_monthly_case_data(dataset_id)
 
     if target_column not in monthly_data.columns:
-        return {"error": f"Target column '{target_column}' not found in dataset."}
+        return {"error": f"Target column '{target_column}' not found."}
 
-    X, y, scaler = prepare_lstm_data(
-        monthly_data, target_column=target_column, sequence_length=3
-    )
+    seq_len = 6
+    X, y, scaler = prepare_lstm_data(monthly_data, target_column=target_column, sequence_length=seq_len)
 
-    # Validate test size
-    if test_size >= len(X):
-        return {"error": f"Test size too large. Must be < {len(X)}"}
+    n_samples = len(X)
+    total_ratio = test_size_ratio + val_size_ratio
 
-    X_train, X_test = X[:-test_size], X[-test_size:]
-    y_train, y_test = y[:-test_size], y[-test_size:]
+    SMALL_DATASET_THRESHOLD = 300  
+
+    if n_samples < SMALL_DATASET_THRESHOLD:
+        if test_size_ratio >= 1 or test_size_ratio <= 0:
+            raise HTTPException(status_code=400, detail="test_size_ratio must be between 0 and 1")
+
+        if n_samples * (1 - test_size_ratio) < 1:
+            raise HTTPException(status_code=400, detail="Dataset too small for the requested test size.")
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size_ratio, shuffle=False)
+        X_val, y_val = None, None
+    else:
+        if n_samples * (1 - total_ratio) < 1:
+            raise HTTPException(status_code=400, detail="Dataset too small for the requested train/val/test split.")
+
+        X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=total_ratio, shuffle=False)
+        val_ratio_adjusted = val_size_ratio / total_ratio
+        X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=1 - val_ratio_adjusted, shuffle=False)
 
     model = build_lstm_model(X.shape[1:])
-    model.fit(X_train, y_train, epochs=200, verbose=0)
+
+    early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+
+    if X_val is not None:
+        model.fit(
+            X_train, y_train,
+            validation_data=(X_val, y_val),
+            epochs=100,
+            batch_size=32,
+            callbacks=[early_stop],
+            verbose=1
+        )
+    else:
+        model.fit(
+            X_train, y_train,
+            epochs=100,
+            batch_size=32,
+            callbacks=[early_stop],
+            verbose=1
+        )
 
     y_pred_scaled = model.predict(X_test)
     y_pred = scaler.inverse_transform(y_pred_scaled).ravel()
@@ -89,21 +125,18 @@ def test_prediction_metrics(
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
-    return JSONResponse(
-        content={
-            "evaluation": {
-                "mae": round(mae, 2),
-                "rmse": round(rmse, 2),
-                "mape": f"{round(mape, 2)}%",
-            },
-            "target_column": target_column,
-            "actual_vs_predicted": [
-                {"actual": round(a, 2), "predicted": round(p, 2)}
-                for a, p in zip(y_true.tolist(), y_pred.tolist())
-            ],
-        }
-    )
-
+    return {
+        "evaluation": {
+            "mae": round(mae, 2),
+            "rmse": round(rmse, 2),
+            "mape": f"{round(mape, 2)}%",
+        },
+        "target_column": target_column,
+        "actual_vs_predicted": [
+            {"actual": round(a, 2), "predicted": round(p, 2)}
+            for a, p in zip(y_true.tolist(), y_pred.tolist())
+        ],
+    }
 
 @router.get("/predict/plot")
 def predict_plot(
