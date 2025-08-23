@@ -17,6 +17,7 @@ import numpy as np
 from app.config import FILE_PATH as file_path
 from app.util.dataset_loader import get_dataset_by_id
 from app.config import get_timestamp, visualizer
+from app.util.normalizer import norm_name, parse_ribu
 
 router = APIRouter()
 
@@ -202,17 +203,43 @@ def generate_heatmap(
     n_months: int = 1,
     target_column: str = "JUMLAH_KASUS",
 ):
+    def load_population_data(path: str = "data/Jumlah_Penduduk_Menurut_Kabupaten_Kota2024.xlsx") -> pd.DataFrame:
+        # This file has 2 metadata rows; real data starts at row 3
+        df = pd.read_excel(path, sheet_name=0, skiprows=2, engine="openpyxl")
+
+        # Expect first two columns: Wilayah | Jumlah Penduduk ... (Ribu Jiwa)
+        df = df.rename(columns={
+            df.columns[0]: "WILAYAH",
+            df.columns[1]: "PENDUDUK_RIBU",
+        })
+
+        out = pd.DataFrame()
+        out["DOMISILI"] = df["WILAYAH"].astype(str).str.upper().str.strip()
+        out["JUMLAH_PENDUDUK"] = (
+            df["PENDUDUK_RIBU"].map(parse_ribu).fillna(0) * 1000
+        ).round().astype("Int64")
+
+        print(out.head(10).to_string())
+        print(out["DOMISILI"].loc[out["DOMISILI"].isna() | (out["DOMISILI"] == "")].unique())
+
+        print("Population data sample:", out.head(10).to_string())
+        print("Missing population for:", out.loc[out["JUMLAH_PENDUDUK"].isna(), "DOMISILI"].unique()[:10])
+
+        return out[["DOMISILI", "JUMLAH_PENDUDUK"]]
+
+    
     df = get_dataset_by_id(dataset_id)
+    df["DOMISILI"] = df["DOMISILI"].map(norm_name)   # normalize rehab data
+
     areas = df["DOMISILI"].dropna().unique()
 
     predictions = []
-
     for area in areas:
         monthly_data = load_monthly_case_data(dataset_id, area=area)
 
         if monthly_data.empty or target_column not in monthly_data.columns:
             predictions.append({
-                "DOMISILI": area.upper().strip(),
+                "DOMISILI": norm_name(area),   # use norm_name
                 "JUMLAH_PREDIKSI": 0
             })
             continue
@@ -220,11 +247,9 @@ def generate_heatmap(
         X, y, scaler = prepare_lstm_data(
             monthly_data, target_column=target_column, sequence_length=3
         )
-
-        # Skip if not enough data to form sequences
         if X.ndim != 3 or X.shape[0] == 0:
             predictions.append({
-                "DOMISILI": area.upper().strip(),
+                "DOMISILI": norm_name(area),
                 "JUMLAH_PREDIKSI": 0
             })
             continue
@@ -235,15 +260,17 @@ def generate_heatmap(
         prediction = forecast_next(model, X[-1], scaler, n_steps=n_months).ravel().tolist()
         first_pred = round(prediction[0], 2)
         predictions.append({
-            "DOMISILI": area.upper().strip(),
+            "DOMISILI": norm_name(area),
             "JUMLAH_PREDIKSI": first_pred
         })
 
     predictions_df = pd.DataFrame(predictions)
+    population_df = load_population_data()
 
     return visualizer.plot_heatmap_dual_interactive(
         df=df,
         map_path="data/kota-kabupaten.json",
         predictions_df=predictions_df,
-        month=month
+        month=month,
+        population_df=population_df
     )

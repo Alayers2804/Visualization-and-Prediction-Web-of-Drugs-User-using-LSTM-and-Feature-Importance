@@ -9,6 +9,7 @@ import io
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import folium
+from app.util.normalizer import norm_name
 from folium.features import GeoJsonTooltip
 
 class Visualizer:
@@ -123,7 +124,14 @@ class Visualizer:
         else:
             return self.save_plot(fig, filename)
 
-    def plot_heatmap_dual_interactive(self, df, map_path: str, predictions_df: pd.DataFrame, month: str = None) -> dict:
+    def plot_heatmap_dual_interactive(
+        self,
+        df,
+        map_path: str,
+        predictions_df: pd.DataFrame,
+        month: str = None,
+        population_df: pd.DataFrame = None
+    ) -> dict:
         df.columns = df.columns.str.strip()
         df["TANGGAL"] = pd.to_datetime(df["TANGGAL"], errors="coerce")
         df["BULAN"] = df["TANGGAL"].dt.to_period("M").astype(str)
@@ -131,7 +139,9 @@ class Visualizer:
         if month:
             df = df[df["BULAN"] == month]
 
-        df["DOMISILI"] = df["DOMISILI"].str.upper().str.strip()
+        # NORMALIZE NAMES
+        df["DOMISILI"] = df["DOMISILI"].map(norm_name)
+
         case_counts = (
             df.groupby("DOMISILI", as_index=False)
             .size()
@@ -139,17 +149,36 @@ class Visualizer:
         )
 
         map_df = gpd.read_file(map_path)
-        map_df["DOMISILI"] = map_df["NAME_2"].str.upper().str.strip()
+        map_df["DOMISILI"] = map_df["NAME_2"].map(norm_name)
 
         merged = map_df.merge(case_counts, on="DOMISILI", how="left")
         merged["TOTAL_KASUS"] = merged["TOTAL_KASUS"].fillna(0)
 
-        predictions_df["DOMISILI"] = predictions_df["DOMISILI"].str.upper().str.strip()
+        predictions_df = predictions_df.copy()
+        predictions_df["DOMISILI"] = predictions_df["DOMISILI"].map(norm_name)
         merged = merged.merge(predictions_df, on="DOMISILI", how="left")
         merged["JUMLAH_PREDIKSI"] = merged["JUMLAH_PREDIKSI"].fillna(0)
 
+
+        # bring in population (normalize names too)
+        if population_df is not None and not population_df.empty:
+            pop = population_df.copy()
+            pop["DOMISILI"] = pop["DOMISILI"].map(norm_name)
+            merged = merged.merge(pop, on="DOMISILI", how="left")
+        else:
+            merged["JUMLAH_PENDUDUK"] = pd.NA
+
+        # nice formatting for tooltip
+        merged["JUMLAH_PENDUDUK_FMT"] = merged["JUMLAH_PENDUDUK"].apply(
+            lambda x: f"{int(x):,}" if pd.notna(x) and x > 0 else "Tidak Tersedia"
+        )
+
         if merged["TOTAL_KASUS"].sum() == 0 and merged["JUMLAH_PREDIKSI"].sum() == 0:
             return {"error": f"Tidak ada data untuk bulan {month or 'yang dipilih'}."}
+        
+        print("pop sample:", merged[["DOMISILI","JUMLAH_PENDUDUK"]].head(10).to_string())
+        print("missing pop for:", merged.loc[merged["JUMLAH_PENDUDUK"].isna(), "DOMISILI"].unique()[:10])
+
 
         center = [merged.geometry.centroid.y.mean(), merged.geometry.centroid.x.mean()]
         m = folium.Map(location=center, zoom_start=8, tiles="cartodbpositron")
@@ -157,7 +186,7 @@ class Visualizer:
         folium.Choropleth(
             geo_data=merged.to_json(),
             data=merged,
-            columns=["DOMISILI", "JUMLAH_PREDIKSI"],
+            columns=["DOMISILI", "JUMLAH_PREDIKSI"],  # unchanged
             key_on="feature.properties.DOMISILI",
             fill_color="YlOrRd",
             fill_opacity=0.7,
@@ -165,20 +194,16 @@ class Visualizer:
             legend_name="Jumlah Prediksi"
         ).add_to(m)
 
-        # Tooltip with both
         folium.GeoJson(
             merged,
             name="Kasus & Prediksi",
-            style_function=lambda x: {
-                "fillColor": "#transparent",
-                "color": "black",
-                "weight": 0.5
-            },
+            style_function=lambda x: {"fillColor": "#transparent", "color": "black", "weight": 0.5},
             tooltip=GeoJsonTooltip(
-                fields=["DOMISILI", "TOTAL_KASUS", "JUMLAH_PREDIKSI"],
-                aliases=["Domisili:", "Jumlah Kasus Aktual:", "Jumlah Prediksi:"],
+                fields=["DOMISILI", "JUMLAH_PENDUDUK_FMT", "TOTAL_KASUS", "JUMLAH_PREDIKSI"],
+                aliases=["Domisili:", "Jumlah Penduduk:", "Jumlah Kasus Aktual:", "Jumlah Prediksi:"],
                 localize=True
             )
         ).add_to(m)
 
         return {"map_html": m._repr_html_()}
+

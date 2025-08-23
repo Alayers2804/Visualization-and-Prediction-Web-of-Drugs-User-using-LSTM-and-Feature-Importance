@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from app.model.database import Base
 
 # Global dataset path
-FILE_PATH = "data/dataset_tat_rehab.xlsx"
+FILE_PATH = "data"
 SQLALCHEMY_DATABASE_URL = "sqlite:///./data/db.sqlite3"
 
 
